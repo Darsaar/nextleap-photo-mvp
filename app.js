@@ -87,12 +87,29 @@ function goHome() { $("results").classList.add("hidden"); $("home").classList.re
 function showResults() { $("home").classList.add("hidden"); $("results").classList.remove("hidden"); setNav("search"); }
 
 // ---------- search box suggestions ----------
+// Labels already in the library, used to complete a half-typed word ("dos" -> dosa).
+function labelVocab() {
+  const v = new Map();
+  for (const p of LIB) {
+    p.people.forEach(x => v.set(x.toLowerCase(), { label: x, icon: "person" }));
+    [p.place, p.city].filter(Boolean).forEach(x => v.set(x.toLowerCase(), { label: x, icon: "location_on" }));
+    p.objects.forEach(x => { if (!v.has(x.toLowerCase())) v.set(x.toLowerCase(), { label: x, icon: "sell" }); });
+  }
+  return [...v.values()];
+}
+
 function showSuggest(all) {
   const typed = all ? "" : $("q").value.trim().toLowerCase();
+  const last = typed.split(/\s+/).pop() || "";
+  const done = typed.slice(0, typed.length - last.length);
+  const comp = last.length >= 2
+    ? labelVocab().filter(x => x.label.toLowerCase().split(/\s+/).some(w => w.startsWith(last)) && !done.includes(x.label.toLowerCase())).slice(0, 6)
+    : [];
   const ex = EXAMPLES.filter(e => !typed || e.includes(typed));
   const ts = TASKS.filter(t => !typed || t.say.toLowerCase().includes(typed));
-  if (!ex.length && !ts.length) { hideSuggest(); return; }
+  if (!comp.length && !ex.length && !ts.length) { hideSuggest(); return; }
   $("suggest").innerHTML =
+    (comp.length ? `<div class="sg-h">In your photos</div>` + comp.map(c => `<button type="button" data-s="${h(done + c.label)}"><span class="ms">${c.icon}</span>${h(done)}<b>${h(c.label)}</b></button>`).join("") : "") +
     (ex.length ? `<div class="sg-h">Try describing a photo</div>` + ex.map(e => `<button type="button" data-s="${h(e)}"><span class="ms">search</span>${h(e)}</button>`).join("") : "") +
     (ts.length ? `<div class="sg-h">Test tasks from the interviews</div>` + ts.map(t => `<button type="button" data-t="${t.id}"><span class="ms">checklist</span>${h(t.say)}</button>`).join("") : "");
   $("suggest").classList.remove("hidden");
@@ -138,12 +155,25 @@ async function readSentence(sentence) {
     if (r.ok) {
       const j = await r.json();
       if (j && j.tags) {
-        const t = tagsFromAI(j.tags, LIB);
+        const t = mergeTags(tagsFromAI(j.tags, LIB), ruleParse(sentence, LIB));
         if (t.length) return { tags: t, by: "Read by Gemini" };
       }
     }
   } catch (e) {}
   return { tags: ruleParse(sentence, LIB), by: "Read by simple rules (AI not connected)" };
+}
+
+// Keep Gemini's reading, and add any word it skipped so nothing the person typed is ignored.
+function mergeTags(ai, rules) {
+  const out = [...ai];
+  const said = ai.map(t => `${t.label} ${typeof t.value === "string" ? t.value : ""}`.toLowerCase()).join(" ");
+  for (const r of rules) {
+    if (r.type === "time" && out.some(t => t.type === "time")) continue;
+    if (out.some(t => t.type === r.type && String(t.value).toLowerCase() === String(r.value).toLowerCase())) continue;
+    if (typeof r.value === "string" && said.includes(r.value.toLowerCase())) continue;
+    out.push(r);
+  }
+  return out;
 }
 
 function startTask(id) {
@@ -207,7 +237,7 @@ function renderResults() {
     banner.classList.remove("hidden");
   } else banner.classList.add("hidden");
   if (!tags.length) { $("grid").innerHTML = `<p class="sec">Type what you remember, or pick something in Filters.</p>`; return; }
-  if (!top.length) { $("grid").innerHTML = `<p class="sec">No photos found. Try removing a filter.</p>`; return; }
+  if (!top.length) { $("grid").innerHTML = `<p class="sec">No photos with ${tags.map(t => `“${h(t.label)}”`).join(" or ")}. Try other words, or open Filters to search by person, place or date.</p>`; return; }
   $("grid").innerHTML = top.map((g, i) => {
     const p = g.best.photo;
     return `<div class="tile ${g.best.full ? "full" : ""}" data-open="${p.id}">

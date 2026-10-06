@@ -48,6 +48,7 @@ const FAMILIES = {
   rangoli: ["rangoli"],
   wedding: ["wedding"],
   dosa: ["dosa"],
+  food: ["food", "meal", "breakfast", "lunch", "dinner"],
   thali: ["thali"],
   temple: ["temple"],
   church: ["church"],
@@ -60,6 +61,9 @@ const FAMILIES = {
   lake: ["lake"],
   fog: ["fog", "mist", "misty", "foggy"],
 };
+
+// Extra label words that count as a match for a family, without being read from the sentence.
+const ALSO = { food: ["dosa", "thali", "rice", "curry", "chutney", "sambar", "banana leaf", "cake", "cold coffee"] };
 
 const PEOPLE_ALIASES = {
   sister: "Isha", sis: "Isha", wife: "Riya", son: "Kabir", kid: "Kabir", baby: "Kabir", boy: "Kabir",
@@ -144,7 +148,7 @@ export function parseTime(s) {
 // ---------- sentence -> tags (rule-based reader) ----------
 export function ruleParse(sentence, photos) {
   const vocab = libraryVocab(photos);
-  const raw = sentence.toLowerCase().replace(/[’']/g, "'");
+  const raw = sentence.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[’']/g, "'");
   let s = " " + raw.replace(/[^a-z0-9\s-]/g, " ") + " ";
   const tags = [];
   const used = new Set();
@@ -190,16 +194,49 @@ export function ruleParse(sentence, photos) {
   const keep = famHits.filter(h => !famHits.some(o => o !== h && o.syn.length > h.syn.length && o.syn.includes(h.syn)));
   keep.sort((a, b) => a.idx - b.idx).forEach(h => {
     tags.push({ type: "detail", value: h.fam, color: h.color, label: (h.color ? h.color + " " : "") + h.fam });
-    used.add(h.syn); if (h.color) used.add(h.color);
+    h.syn.split(/\s+/).forEach(w => used.add(w)); if (h.color) used.add(h.color);
   });
 
-  // words that appear as printed text in the library (brand names on tickets, documents)
+  // Every other word is still searched: in names, places, things seen, printed text and source,
+  // allowing a partial word ("dos" -> dosa) or a small typo ("sunrse" -> sunrise).
   for (const w of words) {
-    if (STOP.has(w) || w.length < 4 || used.has(w)) continue;
+    if (STOP.has(w) || GENERIC.has(w) || w.length < 3 || used.has(w) || /^\d+$/.test(w)) continue;
     if (Object.values(FAMILIES).some(syns => syns.includes(w))) continue;
-    if (vocab.textWords.has(w)) tags.push({ type: "text", value: w, label: `“${w}”` });
+    if (COLORS.includes(w)) { tags.push({ type: "any", value: w, label: w }); continue; }
+    const name = vocab.people.find(n => n.length > 2 && n.toLowerCase().startsWith(w));
+    if (name && !people.has(name)) { people.add(name); tags.push({ type: "person", value: name, label: name }); continue; }
+    tags.push({ type: "any", value: w, label: w });
   }
   return tags;
+}
+
+const GENERIC = new Set("man woman guy girl person people someone somebody thing things stuff image images shot screenshot picture kind sort which what with".split(" "));
+
+function lev(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+
+// Find a word anywhere in a photo's labels, forgiving partial words and small typos.
+// Returns the label phrase it was found in, or null.
+export function fuzzyFind(word, p) {
+  const w = word.toLowerCase();
+  if (w.length < 3) return null;
+  const fields = [...p.people, p.place, p.city, ...p.objects, p.source, p.text || ""].filter(Boolean);
+  for (const f of fields) {
+    for (const tok of f.toLowerCase().split(/[^a-z0-9']+/).filter(Boolean)) {
+      const ok = tok === w || tok.startsWith(w)
+        || (w.length >= 4 && tok.length >= 4 && w.startsWith(tok))
+        || (w.length >= 4 && tok.length >= 4 && lev(w, tok) <= 1)
+        || (w.length >= 7 && lev(w, tok) <= 2);
+      if (ok) return f.length > 40 ? tok : f;
+    }
+  }
+  return null;
 }
 
 // Gemini returns a loose JSON; turn it into the same tag shape, keeping only values we can check.
@@ -230,7 +267,7 @@ export function tagsFromAI(j, photos) {
 }
 
 // ---------- scoring ----------
-const WEIGHT = { person: 3, place: 3, time: 2, detail: 2, text: 2, kind: 2, daypart: 1 };
+const WEIGHT = { person: 3, place: 3, time: 2, detail: 2, text: 2, kind: 2, daypart: 1, any: 2 };
 
 export const DAYPARTS = { morning: [5, 12], afternoon: [12, 17], evening: [17, 21], night: [21, 29] };
 
@@ -262,7 +299,7 @@ function checkTag(tag, p) {
     return { r: "no", say: `${monthLabel(d)}, not ${tag.label}` };
   }
   if (tag.type === "detail") {
-    const syns = FAMILIES[tag.value] || [tag.value];
+    const syns = (FAMILIES[tag.value] || [tag.value]).concat(ALSO[tag.value] || []);
     const phrases = [...p.objects, p.place].map(x => x.toLowerCase());
     const hit = phrases.find(ph => syns.some(sy => hasWord(ph, sy)));
     if (hit) {
@@ -271,8 +308,15 @@ function checkTag(tag, p) {
       const other = COLORS.find(c => hasWord(hit, c));
       return { r: "near", say: other ? `${hit}, not ${tag.color}` : `${hit}, colour unknown` };
     }
-    if (syns.some(sy => hasWord(p.text || "", sy))) return { r: "yes", say: `${tag.value} (in text)` };
+    if (!ALSO[tag.value] && syns.some(sy => hasWord(p.text || "", sy))) return { r: "yes", say: `${tag.value} (in text)` };
+    const words = tag.value.split(/\s+/);
+    const found = words.map(w => fuzzyFind(w, p));
+    if (found.every(Boolean)) return { r: tag.color && !found.some(f => hasWord(f, tag.color)) ? "near" : "yes", say: found[found.length - 1] };
     return { r: "no", say: `no ${tag.label}` };
+  }
+  if (tag.type === "any") {
+    const f = fuzzyFind(tag.value, p);
+    return f ? { r: "yes", say: f } : { r: "no", say: `no ${tag.label}` };
   }
   if (tag.type === "daypart") {
     const [a, b] = DAYPARTS[tag.value] || [0, 0];
@@ -284,7 +328,9 @@ function checkTag(tag, p) {
     return k && k.test(p) ? { r: "yes", say: tag.label } : { r: "no", say: `not ${tag.label.toLowerCase()}` };
   }
   if (tag.type === "text") {
-    return hasWord(p.text || "", tag.value) ? { r: "yes", say: tag.label } : { r: "no", say: `no ${tag.label}` };
+    if (hasWord(p.text || "", tag.value)) return { r: "yes", say: tag.label };
+    const f = fuzzyFind(tag.value, p);
+    return f ? { r: "yes", say: f } : { r: "no", say: `no ${tag.label}` };
   }
   return { r: "no", say: "" };
 }
