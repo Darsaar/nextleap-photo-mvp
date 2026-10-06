@@ -201,3 +201,33 @@ h2{font-size:16px;font-weight:500;margin:0}
 .tasknote{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--on-blue-c);background:var(--blue-c);border-radius:8px;padding:4px 10px;margin:0 0 4px}
 .tasknote .ms{font-size:18px}
 @media (max-width:800px){ .fpanel,.suggest{position:fixed;top:64px;left:8px;right:8px;max-height:calc(100vh - 80px)} }
+
+/* collections */
+.row-h{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.colsearch{display:flex;align-items:center;gap:8px;height:40px;border-radius:20px;background:var(--pill);padding:0 14px;color:var(--sec);min-width:0}
+.colsearch input{border:0;background:transparent;outline:none;width:200px;max-width:50vw;color:var(--text)}
+.csec{margin-top:22px}
+.csec h2{margin-bottom:10px}
+.crow{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px 12px}
+.ctile{border:0;background:none;padding:0;text-align:left;cursor:pointer;color:var(--text);min-width:0}
+.cimg{aspect-ratio:1;border-radius:12px;background:var(--tile) center/cover no-repeat}
+.ctile:hover .cimg{filter:brightness(.92)}
+.cname{margin:8px 0 0;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ccount{margin:0;font-size:12px;color:var(--sec)}
+.faces-row{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}
+.cface{border:0;background:none;cursor:pointer;color:var(--text);display:flex;flex-direction:column;align-items:center;gap:6px;padding:0}
+.cface div{width:88px;height:88px;border-radius:50%;background:var(--tile) center/cover no-repeat}
+.cface:hover div{filter:brightness(.92)}
+.cface p{margin:0;font-size:13px;font-weight:500}
+.scopechip{display:inline-flex;align-items:center;gap:6px;height:32px;border-radius:8px;background:var(--blue-c);color:var(--on-blue-c);padding:0 4px 0 10px;font-weight:500;margin:0 0 8px}
+.scopechip .ms{font-size:18px}
+.scopechip .x{border:0;background:none;cursor:pointer;color:inherit;display:inline-flex;padding:2px;border-radius:50%}
+.tl{display:flex;flex-wrap:wrap;gap:20px 8px;align-items:flex-start;margin-top:8px}
+@media (max-width:520px){ .crow{grid-template-columns:repeat(2,minmax(0,1fr))} }
+@media (max-width:640px){
+  .faces-row{display:flex;overflow-x:auto;gap:14px;padding-bottom:6px;scrollbar-width:none}
+  .faces-row::-webkit-scrollbar{display:none}
+  .cface{flex:0 0 auto}
+  .cface div{width:68px;height:68px}
+}
+.suggest .sg-n{margin-left:auto;color:var(--sec);font-size:12px;padding-left:12px}

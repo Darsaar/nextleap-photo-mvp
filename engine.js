@@ -231,7 +231,7 @@ export function fuzzyFind(word, p) {
     for (const tok of f.toLowerCase().split(/[^a-z0-9']+/).filter(Boolean)) {
       const ok = tok === w || tok.startsWith(w)
         || (w.length >= 4 && tok.length >= 4 && w.startsWith(tok))
-        || (w.length >= 4 && tok.length >= 4 && lev(w, tok) <= 1)
+        || (w.length >= 5 && tok.length >= 5 && lev(w, tok) <= 1)
         || (w.length >= 7 && lev(w, tok) <= 2);
       if (ok) return f.length > 40 ? tok : f;
     }

@@ -1,4 +1,4 @@
-import { ruleParse, tagsFromAI, parseTime, search, followUp, oneWord, oneWordCandidates, TODAY, KINDS, DAYPARTS } from "./engine.js";
+import { ruleParse, tagsFromAI, parseTime, search, scorePhoto, followUp, oneWord, oneWordCandidates, TODAY, KINDS, DAYPARTS } from "./engine.js";
 
 const $ = id => document.getElementById(id);
 const h = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -27,6 +27,7 @@ let startedAt = 0;
 let todayWord = null;
 let viewing = null;
 let readBy = "";
+let scope = null; // an open collection: { name, tags }
 let measures = {};
 try { measures = JSON.parse(localStorage.getItem("mm-measures") || "{}"); } catch (e) {}
 
@@ -49,13 +50,14 @@ async function boot() {
     run($("q").value);
   };
   $("q").onfocus = () => { hideFilters(); $("q").select(); showSuggest(true); };
-  $("q").oninput = () => showSuggest(false);
+  $("q").oninput = () => { showSuggest(false); if (!$("collections").classList.contains("hidden")) renderCollections(); };
   // the filter panel sits inside the form, so Enter is handled here rather than by implicit form submission
   $("q").onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); $("form").requestSubmit(); } };
   document.addEventListener("click", e => { if (!e.target.closest(".searchpill")) { hideSuggest(); hideFilters(); } });
   $("clearQ").onclick = () => { $("q").value = ""; $("q").focus(); };
   $("filterBtn").onclick = e => { e.stopPropagation(); toggleFilters(); };
-  $("backBtn").onclick = goHome;
+  $("backBtn").onclick = () => { if (scope) goCollections(); else goHome(); };
+  $("scopeChip").onclick = e => { if (e.target.closest("#scopeX")) { scope = null; setPlaceholder(); if ($("q").value.trim()) run($("q").value); else goHome(); } };
   $("logo").onclick = e => { e.preventDefault(); goHome(); };
   $("menuBtn").onclick = () => $("rail").classList.toggle("open");
   $("rail").onclick = e => {
@@ -65,6 +67,7 @@ async function boot() {
     $("rail").classList.remove("open");
     const n = a.dataset.nav;
     if (n === "photos") goHome();
+    if (n === "collections") goCollections();
     if (n === "search") { if (tags.length) showResults(); else $("q").focus(); }
     if (n === "tasks") showTasks();
     if (n === "compare") showCompare();
@@ -83,8 +86,12 @@ async function boot() {
 }
 
 function setNav(n) { document.querySelectorAll(".navi").forEach(a => a.classList.toggle("active", a.dataset.nav === n)); }
-function goHome() { $("results").classList.add("hidden"); $("home").classList.remove("hidden"); setNav("photos"); renderTimeline(); }
-function showResults() { $("home").classList.add("hidden"); $("results").classList.remove("hidden"); setNav("search"); }
+const VIEWS = ["home", "results", "collections"];
+function show(v) { VIEWS.forEach(x => $(x).classList.toggle("hidden", x !== v)); window.scrollTo(0, 0); }
+function goHome() { scope = null; setPlaceholder(); show("home"); setNav("photos"); renderTimeline(); }
+function showResults() { show("results"); if (!scope) setNav("search"); }
+function goCollections() { scope = null; tags = []; $("fbadge").classList.add("hidden"); $("filterBtn").classList.remove("on"); setPlaceholder(); show("collections"); setNav("collections"); renderCollections(); }
+function setPlaceholder() { $("q").placeholder = scope ? `Search in ${scope.name}` : "Search photos or collections, like “Goa trip sunset”"; }
 
 // ---------- search box suggestions ----------
 // Labels already in the library, used to complete a half-typed word ("dos" -> dosa).
@@ -102,13 +109,17 @@ function showSuggest(all) {
   const typed = all ? "" : $("q").value.trim().toLowerCase();
   const last = typed.split(/\s+/).pop() || "";
   const done = typed.slice(0, typed.length - last.length);
-  const comp = last.length >= 2
-    ? labelVocab().filter(x => x.label.toLowerCase().split(/\s+/).some(w => w.startsWith(last)) && !done.includes(x.label.toLowerCase())).slice(0, 6)
+  let comp = last.length >= 2
+    ? labelVocab().filter(x => x.label.toLowerCase().split(/\s+/).some(w => w.startsWith(last)) && !done.includes(x.label.toLowerCase()))
     : [];
+  const cols = typed ? matchCollections(typed).slice(0, 4) : [];
+  const shown = new Set(cols.map(c => c.name.toLowerCase()));
+  comp = comp.filter(c => !shown.has(c.label.toLowerCase())).slice(0, 6);
   const ex = EXAMPLES.filter(e => !typed || e.includes(typed));
   const ts = TASKS.filter(t => !typed || t.say.toLowerCase().includes(typed));
-  if (!comp.length && !ex.length && !ts.length) { hideSuggest(); return; }
+  if (!cols.length && !comp.length && !ex.length && !ts.length) { hideSuggest(); return; }
   $("suggest").innerHTML =
+    (cols.length ? `<div class="sg-h">Collections</div>` + cols.map(c => `<button type="button" data-c="${h(c.name)}"><span class="ms">${c.icon}</span><b>${h(c.name)}</b><span class="sg-n">${countIn(c)}</span></button>`).join("") : "") +
     (comp.length ? `<div class="sg-h">In your photos</div>` + comp.map(c => `<button type="button" data-s="${h(done + c.label)}"><span class="ms">${c.icon}</span>${h(done)}<b>${h(c.label)}</b></button>`).join("") : "") +
     (ex.length ? `<div class="sg-h">Try describing a photo</div>` + ex.map(e => `<button type="button" data-s="${h(e)}"><span class="ms">search</span>${h(e)}</button>`).join("") : "") +
     (ts.length ? `<div class="sg-h">Test tasks from the interviews</div>` + ts.map(t => `<button type="button" data-t="${t.id}"><span class="ms">checklist</span>${h(t.say)}</button>`).join("") : "");
@@ -117,17 +128,20 @@ function showSuggest(all) {
     const b = e.target.closest("button");
     if (!b) return;
     hideSuggest();
-    if (b.dataset.t) startTask(b.dataset.t); else { activeTask = null; run(b.dataset.s); }
+    if (b.dataset.c) openCollection(allCollections().find(c => c.name === b.dataset.c));
+    else if (b.dataset.t) startTask(b.dataset.t); else { activeTask = null; run(b.dataset.s); }
   };
 }
 function hideSuggest() { $("suggest").classList.add("hidden"); }
 
 // ---------- Photos timeline (justified rows, grouped by day) ----------
-function renderTimeline() {
+function renderTimeline() { renderDays($("timeline"), LIB); }
+
+function renderDays(el, photos) {
   const H = window.innerWidth < 600 ? 100 : 150;
-  const maxW = ($("timeline").clientWidth || 900);
+  const maxW = (el.clientWidth || 900);
   const byDay = new Map();
-  [...LIB].sort((a, b) => (a.date < b.date ? 1 : -1)).forEach(p => {
+  [...photos].sort((a, b) => (a.date < b.date ? 1 : -1)).forEach(p => {
     const k = p.date.slice(0, 10);
     if (!byDay.has(k)) byDay.set(k, []);
     byDay.get(k).push(p);
@@ -138,8 +152,124 @@ function renderTimeline() {
     const place = [...new Set(ps.map(p => p.place).filter(Boolean))][0] || "";
     html += `<div class="dsec"><p class="day-h">${dt(day + " 00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", ...(day.slice(0, 4) !== TODAY.slice(0, 4) ? { year: "numeric" } : {}) })}${place ? ` <span>${h(place)}</span>` : ""}</p><div class="tiles">${ps.map(p => `<div class="jt" data-open="${p.id}" style="width:${Math.min(maxW, Math.round((p.w / p.h) * H))}px;height:${H}px;background-image:url('${img(p)}')"></div>`).join("")}</div></div>`;
   }
-  $("timeline").innerHTML = html;
-  $("timeline").onclick = e => { const t = e.target.closest("[data-open]"); if (t) openPhoto(t.dataset.open); };
+  el.innerHTML = html;
+  el.onclick = e => { const t = e.target.closest("[data-open]"); if (t) openPhoto(t.dataset.open); };
+}
+
+// ---------- Collections ----------
+// Pick a cover that shows what the collection is about.
+function cover(photos, c) {
+  if (c.hint) { const hp = photos.find(p => p.objects.some(o => o.includes(c.hint))); if (hp) return hp; }
+  const words = c.name.toLowerCase().replace(/[^a-z ]/g, " ").split(/\s+/).filter(w => w.length > 2).map(w => w.replace(/(es|s)$/, ""));
+  const tagWords = c.tags.map(t => String(typeof t.value === "string" ? t.value : "").toLowerCase()).filter(Boolean);
+  const docLike = p => p.objects.some(o => /medicine|document|bill|pass|insurance|tablet/.test(o));
+  const score = p => (p.source === "Camera" ? 2 : 0) + (docLike(p) ? 0 : 2)
+    + ([...words, ...tagWords].some(w => (p.objects[0] || "").includes(w)) ? 4 : 0)
+    + ([...words, ...tagWords].some(w => p.objects.join(" ").includes(w)) ? 2 : 0);
+  return [...photos].sort((a, b) => score(b) - score(a))[0];
+}
+
+// A clear photo of each person for their circle.
+const FACE_HINT = { Riya: "selfie", Kabir: "red sweater", Rahul: "green cup", Priya: "mountains", Mom: "mehendi", Isha: "black cup", Mihir: "mole", Dad: "glasses" };
+
+function trips() {
+  // runs of photos in one city away from home, a day or two apart
+  const away = [...LIB].filter(p => p.city && p.city !== "Bengaluru").sort((a, b) => (a.date < b.date ? -1 : 1));
+  const out = [];
+  for (const p of away) {
+    const last = out[out.length - 1];
+    const d = p.date.slice(0, 10);
+    if (last && last.city === p.city && (dt(d + " 00:00") - dt(last.to + " 00:00")) / 864e5 <= 2) { last.to = d; last.photos.push(p); }
+    else out.push({ city: p.city, from: d, to: d, photos: [p] });
+  }
+  return out.filter(t => t.photos.length >= 4).reverse();
+}
+
+const TRIP_HINT = { Delhi: "monument", Goa: "beach", Coorg: "coffee plantation" };
+function tripDef(t) {
+  const name = `${t.city} · ${dt(t.from + " 00:00").toLocaleDateString("en-GB", { month: "short", year: "numeric" })}`;
+  // a couple of days either side, so tickets and bookings saved before the trip belong to it
+  const shift = (d, n) => { const x = dt(d + " 12:00"); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+  return { name, icon: "luggage", tags: [{ type: "place", value: t.city.toLowerCase(), match: [t.city.toLowerCase()], label: t.city }, { type: "time", value: { label: name, windows: [[shift(t.from, -2), shift(t.to, 1)]] }, label: name }] };
+}
+
+function collectionDefs() {
+  const people = [...new Set(LIB.flatMap(p => p.people))].filter(n => n !== "Aarav")
+    .map(n => ({ n, ps: LIB.filter(p => p.people.includes(n)) })).sort((a, b) => b.ps.length - a.ps.length);
+  const cities = [...new Set(LIB.map(p => p.city).filter(Boolean))]
+    .map(c => ({ c, ps: LIB.filter(p => p.city === c) })).sort((a, b) => b.ps.length - a.ps.length);
+  const thing = (label, q, icon = "sell", hint) => { const t = makeTag("detail", q); return { name: label, icon, tags: [t], hint }; };
+  const kind = (k, icon) => ({ name: KINDS[k].label, icon, tags: [{ type: "kind", value: k, label: KINDS[k].label }] });
+  return {
+    people: people.map(({ n, ps }) => ({ name: n, icon: "person", tags: [{ type: "person", value: n, label: n }], face: ps.find(p => p.objects.includes(FACE_HINT[n]) || p.objects.some(o => o.includes(FACE_HINT[n] || "~"))) || ps.find(p => p.people.length === 1 && p.source === "Camera") || ps[0] })),
+    trips: trips().map(t => ({ ...tripDef(t), hint: TRIP_HINT[t.city] })),
+    places: cities.map(({ c }) => ({ name: c, icon: "location_on", tags: [{ type: "place", value: c.toLowerCase(), match: [c.toLowerCase()], label: c }] })),
+    things: [thing("Sunrises", "sunrise"), thing("Beaches", "beach"), thing("Food", "food", "sell", "dosa"), thing("Birthdays", "cake"), thing("Fairy lights", "fairy lights"), thing("Kids' park", "swing"), thing("Diwali", "diyas", "sell", "diya"), thing("Weddings", "wedding"), thing("Whiteboards", "whiteboard"), thing("Coffee estates", "plantation", "sell", "coffee plantation")],
+    docs: [{ ...kind("document", "description"), hint: "insurance" }, kind("screenshot", "screenshot_monitor"), thing("Bills", "bill", "receipt_long"), thing("Tickets", "ticket", "airplane_ticket"), thing("Insurance", "insurance", "shield"), thing("Medicines", "medicine", "medication"), kind("whatsapp", "chat"), kind("selfie", "photo_camera_front")],
+  };
+}
+
+let COLS = null;
+function cols() { return COLS || (COLS = collectionDefs()); }
+function allCollections() { const C = cols(); return [...C.people, ...C.trips, ...C.places, ...C.things, ...C.docs]; }
+const countIn = c => LIB.filter(p => scorePhoto(c.tags, p).full).length;
+// words a collection answers to: its name, plus "trip" for trips
+const colWords = c => (c.name + (c.icon === "luggage" ? " trip" : "")).toLowerCase().replace(/[·']/g, " ").split(/\s+/).filter(Boolean);
+function colMatches(c, text) {
+  const ws = text.toLowerCase().split(/\s+/).filter(Boolean);
+  return ws.length && ws.every(w => colWords(c).some(x => x.startsWith(w)));
+}
+function matchCollections(text) { return allCollections().filter(c => colMatches(c, text) && countIn(c)); }
+
+// "goa trip sunset" -> open the Goa trip, then search "sunset" inside it
+const MONTHS = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+function findTrip(sentence) {
+  const s = sentence.toLowerCase();
+  if (!/\btrip\b/.test(s)) return null;
+  const ts = cols().trips.filter(c => s.includes(c.name.split(" · ")[0].toLowerCase()));
+  if (!ts.length) return null;
+  const mon = s.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/)?.[1];
+  const yr = s.match(/\b20\d\d\b/)?.[0] || (/\blast year\b/.test(s) ? String(+TODAY.slice(0, 4) - 1) : null);
+  const pick = ts.find(c => { const n = c.name.toLowerCase(); return (!mon || n.includes(mon)) && (!yr || n.includes(yr)); }) || ts[0];
+  const city = pick.name.split(" · ")[0].toLowerCase();
+  const rest = s.replace(new RegExp(`\\b(trip|${city}|${MONTHS.join("|")})[a-z]*\\b|\\b20\\d\\d\\b|\\blast year\\b|\\b(to|in|from|the|my|our|on)\\b`, "g"), " ").replace(/\s+/g, " ").trim();
+  return { trip: pick, rest };
+}
+
+function renderCollections() {
+  const C = cols();
+  const all = allCollections();
+  const filter = (scope ? "" : $("q").value || "").trim().toLowerCase();
+  const match = c => !filter || colMatches(c, filter);
+  const tile = (c, i) => {
+    const ps = LIB.filter(p => scorePhoto(c.tags, p).full);
+    if (!ps.length) return "";
+    const cv = c.face || cover(ps, c);
+    return `<button class="ctile" data-col="${i}"><div class="cimg" style="background-image:url('${img(cv)}')"></div><p class="cname">${h(c.name)}</p><p class="ccount">${ps.length} item${ps.length === 1 ? "" : "s"}</p></button>`;
+  };
+  const face = (c, i) => `<button class="cface" data-col="${i}"><div style="background-image:url('${img(c.face)}')"></div><p>${h(c.name)}</p></button>`;
+  let idx = 0;
+  const sec = (title, list, fn, cls) => {
+    const start = idx; idx += list.length;
+    const body = list.map((c, j) => match(c) ? fn(c, start + j) : "").join("");
+    return body.trim() ? `<div class="csec"><h2>${title}</h2><div class="${cls}">${body}</div></div>` : "";
+  };
+  const html = sec("People", C.people, face, "crow faces-row") + sec("Trips", C.trips, tile, "crow") + sec("Places", C.places, tile, "crow")
+    + sec("Things", C.things, tile, "crow") + sec("Documents and screenshots", C.docs, tile, "crow");
+  $("colBody").innerHTML = html || `<p class="sec">No collection called “${h(filter)}”. Press Enter to search your photos for it.</p>`;
+  $("colBody").onclick = e => { const b = e.target.closest("[data-col]"); if (b) openCollection(all[+b.dataset.col]); };
+}
+
+function openCollection(c) {
+  scope = c;
+  tags = [];
+  activeTask = null;
+  $("q").value = "";
+  $("taskNote").classList.add("hidden");
+  setPlaceholder();
+  setNav("collections");
+  show("results");
+  refresh();
 }
 
 // ---------- reading the sentence ----------
@@ -184,6 +314,11 @@ function startTask(id) {
 async function run(sentence) {
   sentence = (sentence || "").trim();
   if (!sentence) return;
+  if (!activeTask) {
+    const f = findTrip(sentence);
+    if (f) { scope = f.trip; setPlaceholder(); setNav("collections"); if (!f.rest) { openCollection(f.trip); return; } sentence = f.rest; }
+    else if (!scope) { const exact = allCollections().find(c => c.name.toLowerCase() === sentence.toLowerCase() && c.icon !== "location_on" && c.icon !== "person"); if (exact) { openCollection(exact); return; } }
+  }
   $("q").value = sentence;
   $("q").blur();
   startedAt = performance.now();
@@ -210,15 +345,27 @@ function makeTag(type, val) {
   return parsed || { type: "detail", value: v, color: null, label: v };
 }
 
+function inScope() { return scope ? LIB.filter(p => scorePhoto(scope.tags, p).full) : LIB; }
+
 function refresh() {
-  result = search(tags, LIB);
-  if (!$("q").value.trim()) $("resTitle").textContent = tags.length ? "Filtered photos" : "Search";
+  result = search(tags, inScope());
+  if (!$("q").value.trim()) $("resTitle").textContent = scope ? scope.name : tags.length ? "Filtered photos" : "Search";
+  $("scopeChip").classList.toggle("hidden", !scope);
+  if (scope) $("scopeChip").innerHTML = `<span class="ms">${scope.icon}</span>${h(scope.name)} · ${inScope().length} photos<button class="x" id="scopeX" aria-label="Search all photos"><span class="ms">close</span></button>`;
   const n = tags.length;
   $("fbadge").textContent = n; $("fbadge").classList.toggle("hidden", !n);
   $("filterBtn").classList.toggle("on", !!n);
   if (!$("fpanel").classList.contains("hidden")) renderFilters();
+  if (scope && !tags.length) { renderScopeAll(); $("step4").classList.add("hidden"); return; }
   renderResults();
   renderFollowUp();
+}
+
+function renderScopeAll() {
+  $("nofit").classList.add("hidden");
+  $("grid").classList.add("hidden");
+  $("scopeAll").classList.remove("hidden");
+  renderDays($("scopeAll"), inScope());
 }
 
 // ---------- results, near misses ----------
@@ -228,6 +375,8 @@ function whyLine(checks) {
 }
 
 function renderResults() {
+  $("grid").classList.remove("hidden");
+  $("scopeAll").classList.add("hidden");
   const top = result.groups.slice(0, 6);
   const nofit = top.length && !top[0].best.full;
   const banner = $("nofit");

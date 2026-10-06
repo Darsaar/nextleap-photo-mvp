@@ -16,7 +16,7 @@
   <a class="logo" href="#" id="logo"><span class="ms fill logo-ic">photo_library</span><span class="word">Photos</span><span class="concept">Concept</span></a>
   <form class="searchpill" id="form" autocomplete="off">
     <span class="ms">search</span>
-    <input id="q" placeholder="Describe a photo, like “me and Riya in Goa around Diwali”" aria-label="Describe a photo">
+    <input id="q" placeholder="Search photos or collections, like “Goa trip sunset”" aria-label="Search photos or collections">
     <button type="button" class="icon-btn small" id="clearQ" aria-label="Clear"><span class="ms">close</span></button>
     <button type="button" class="icon-btn small fbtn" id="filterBtn" aria-label="Filters" title="Filters"><span class="ms">tune</span><span class="fbadge hidden" id="fbadge"></span></button>
     <div class="suggest hidden" id="suggest"></div>
@@ -30,6 +30,7 @@
 <div class="shell">
   <nav class="rail" id="rail">
     <a class="navi active" data-nav="photos" href="#"><span class="ms">photo</span>Photos</a>
+    <a class="navi" data-nav="collections" href="#"><span class="ms">photo_album</span>Collections</a>
     <a class="navi" data-nav="search" href="#"><span class="ms">search</span>Search</a>
     <p class="rail-h">Demo</p>
     <a class="navi" data-nav="tasks" href="#"><span class="ms">checklist</span>Test tasks</a>
@@ -49,6 +50,12 @@
       <div id="timeline"></div>
     </section>
 
+    <!-- Collections -->
+    <section id="collections" class="hidden">
+      <div class="home-head"><h1>Collections</h1></div>
+      <div id="colBody"></div>
+    </section>
+
     <!-- Search results -->
     <section id="results" class="hidden">
       <div class="res-head">
@@ -56,8 +63,10 @@
         <h1 id="resTitle"></h1>
       </div>
       <p class="tasknote hidden" id="taskNote"></p>
+      <p class="scopechip hidden" id="scopeChip"></p>
       <div class="banner hidden" id="nofit"></div>
       <div class="grid" id="grid"></div>
+      <div class="tl hidden" id="scopeAll"></div>
       <div class="card followup hidden" id="step4">
         <span class="ms fill fu-ic">help</span>
         <div>
