@@ -9,7 +9,7 @@ const COLORS = ["red", "yellow", "green", "blue", "black", "white", "grey", "gra
 const FAMILIES = {
   hoodie: ["hoodie", "hoody", "sweatshirt", "jacket"],
   sweater: ["sweater", "jumper", "pullover", "cardigan"],
-  "t-shirt": ["t-shirt", "tshirt", "tee"],
+  "t-shirt": ["t-shirt", "t shirt", "tshirt", "tee"],
   shirt: ["shirt"],
   cup: ["cup", "mug"],
   "fairy lights": ["fairy lights", "string lights", "fairy light"],
@@ -60,13 +60,55 @@ const FAMILIES = {
   dog: ["dog"],
   lake: ["lake"],
   fog: ["fog", "mist", "misty", "foggy"],
+  jacket: ["jacket", "coat"],
+  dress: ["dress", "frock", "kurta", "top", "outfit", "clothes"],
+  "id card": ["id card", "identity card", "aadhaar", "aadhar", "aadhaar card", "aadhar card", "pan card", "driving license", "driving licence", "licence", "license", "passport"],
+  prescription: ["prescription", "doctor's note"],
+  award: ["award", "trophy", "certificate", "prize"],
+  anniversary: ["anniversary"],
+  party: ["party", "celebration", "farewell", "event"],
+  traffic: ["traffic", "jam"],
+  restaurant: ["restaurant", "food place", "eatery", "dhaba"],
+  childhood: ["childhood", "as a kid", "as a child", "young face"],
+  "app screenshot": ["linkedin", "backup codes", "otp", "codes", "instagram"],
 };
+// a jacket is its own thing now, so it counts as a close match for a hoodie rather than the same
+FAMILIES.hoodie = ["hoodie", "hoody", "sweatshirt"];
+
+// Things people mix up when remembering. Not the same thing, so they count as a close match (~), not a match.
+const CLOTHES = ["hoodie", "sweatshirt", "sweater", "t-shirt", "shirt", "jacket", "saree", "dress", "trousers"];
+const RELATED = {
+  "id card": ["insurance paper", "document", "boarding pass"],
+  prescription: ["medicine strip", "tablets", "strips"],
+  award: ["stage", "document", "group"],
+  anniversary: ["birthday cake", "candles", "dinner", "wedding"],
+  party: ["birthday cake", "candles", "wedding", "fireworks", "group"],
+  traffic: ["road", "scooter", "car"],
+  restaurant: ["cafe", "thali", "dinner", "lunch", "meal", "breakfast", "dosa", "beach shack"],
+  "app screenshot": ["@screenshot"],
+  childhood: ["@kid"],
+};
+for (const c of CLOTHES) if (FAMILIES[c]) RELATED[c] = CLOTHES.filter(x => x !== c);
+
+function closeMatch(tag, p) {
+  const rel = RELATED[tag.value];
+  if (!rel) return null;
+  if (rel.includes("@kid") && p.people.includes("Kabir")) return { r: "near", say: "a child's photo", part: 0.5 };
+  if (rel.includes("@screenshot") && p.source === "Screenshot") return { r: "near", say: "a screenshot, closest kind", part: 0.5 };
+  // earlier entries in the list are closer, so they rank a little higher
+  const i = rel.findIndex(x => x[0] !== "@" && p.objects.some(o => hasWord(o.toLowerCase(), x)));
+  if (i < 0) return null;
+  const hit = p.objects.find(o => hasWord(o.toLowerCase(), rel[i]));
+  const clothes = CLOTHES.includes(tag.value);
+  const colourOk = !tag.color || hasWord(hit, tag.color);
+  return { r: "near", say: `${hit}, not ${colourOk ? tag.value : tag.label}`, part: clothes ? (colourOk ? 0.6 : 0.25) : (i === 0 ? 0.55 : 0.5) };
+}
 
 // Extra label words that count as a match for a family, without being read from the sentence.
 const ALSO = { food: ["dosa", "thali", "rice", "curry", "chutney", "sambar", "banana leaf", "cake", "cold coffee"] };
 
 const PEOPLE_ALIASES = {
-  sister: "Isha", sis: "Isha", wife: "Riya", son: "Kabir", kid: "Kabir", baby: "Kabir", boy: "Kabir",
+  sister: "Isha", sis: "Isha", wife: "Riya", son: "Kabir", kid: "Kabir", kids: "Kabir", child: "Kabir", toddler: "Kabir", baby: "Kabir", boy: "Kabir", beta: "Kabir", "little one": "Kabir",
   mom: "Mom", mother: "Mom", amma: "Mom", mum: "Mom", dad: "Dad", father: "Dad", papa: "Dad",
 };
 
@@ -84,7 +126,7 @@ const PLACE_ALIASES = {
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const MONTH_FULL = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 const DIWALI = ["2024-11-01", "2025-10-20", "2026-11-08"];
-const STOP = new Set("a an the and or of in on at to from for with my me i we our us was were had have has that this those these photo photos picture pic pics where when who it its is are be been find show looking look for some one there around about like near by she he her his they them their wearing wore holding having trip time day took taken last this year".split(" "));
+const STOP = new Set("a an the and or of in on at to from for with my me i we our us was were had have has that this those these photo photos picture pic pics where when who it its is are be been find show looking look for some one there around about like near by she he her his they them their wearing wore holding having trip time day took taken last this year old mine name important related want wanted buy celebrated celebrate blowing clear copy which remember".split(" "));
 
 const pad = n => String(n).padStart(2, "0");
 const iso = (y, m, d) => `${y}-${pad(m)}-${pad(d)}`;
@@ -284,7 +326,10 @@ export const KINDS = {
 function checkTag(tag, p) {
   const where = `${p.place} ${p.city}`.toLowerCase();
   if (tag.type === "person") {
-    return p.people.includes(tag.value) ? { r: "yes", say: tag.label } : { r: "no", say: `no ${tag.value}` };
+    if (p.people.includes(tag.value)) return { r: "yes", say: tag.label };
+    // you're usually behind the camera, so your own photos count as close for "me"
+    if (tag.value === "Aarav" && p.source === "Camera") return { r: "near", say: "taken by you", part: 0.6 };
+    return { r: "no", say: `no ${tag.value}` };
   }
   if (tag.type === "place") {
     if (tag.match.some(m => hasWord(where, m))) return { r: "yes", say: tag.label };
@@ -312,7 +357,7 @@ function checkTag(tag, p) {
     const words = tag.value.split(/\s+/);
     const found = words.map(w => fuzzyFind(w, p));
     if (found.every(Boolean)) return { r: tag.color && !found.some(f => hasWord(f, tag.color)) ? "near" : "yes", say: found[found.length - 1] };
-    return { r: "no", say: `no ${tag.label}` };
+    return closeMatch(tag, p) || { r: "no", say: `no ${tag.label}` };
   }
   if (tag.type === "any") {
     const f = fuzzyFind(tag.value, p);
@@ -340,7 +385,7 @@ export function scorePhoto(tags, p) {
   const checks = tags.map(t => {
     const c = checkTag(t, p);
     const w = WEIGHT[t.type] || 1;
-    max += w; got += c.r === "yes" ? w : c.r === "near" ? w * 0.4 : 0;
+    max += w; got += c.r === "yes" ? w : c.r === "near" ? w * (c.part ?? 0.4) : 0;
     return { tag: t, ...c };
   });
   return { photo: p, score: max ? got / max : 0, checks, full: checks.every(c => c.r === "yes") };
@@ -350,6 +395,9 @@ const groupKey = p => `${[...p.people].sort().join("+")}|${p.place}|${p.date.sli
 
 export function search(tags, photos) {
   if (!tags.length) return { groups: [], scored: [] };
+  // a loose word that no photo has at all ("fever", "job") can't help rank, so it is left out
+  const live = tags.filter(t => t.type !== "any" || photos.some(p => checkTag(t, p).r === "yes"));
+  if (live.length) tags = live;
   const scored = photos.map(p => scorePhoto(tags, p)).filter(s => s.score > 0)
     .sort((a, b) => b.score - a.score || (a.photo.date < b.photo.date ? 1 : -1));
   const byKey = new Map();

@@ -4,7 +4,7 @@
 const MODELS = (process.env.GEMINI_MODELS || "gemini-3.5-flash-lite,gemini-3.5-flash,gemini-flash-lite-latest,gemini-flash-latest").split(",");
 
 const prompt = (sentence, people, today) => `You turn one sentence, in which someone describes a photo they are trying to find, into search tags.
-Today is ${today}. People in this library: ${people.join(", ")}. The owner is Aarav ("me", "I"). Family: sister = Isha, wife = Riya, son = Kabir, mother = Mom, father = Dad.
+Today is ${today}. People in this library: ${people.join(", ")}. The owner is Aarav ("me", "I"). Family: sister = Isha, wife = Riya, son = Kabir (also "kid", "child", "baby", "beta"), mother = Mom, father = Dad.
 Diwali dates: 2024-11-01, 2025-10-20. "Summer" means April to June. "Last year" means the previous calendar year.
 Return only JSON with this shape, leaving out anything the sentence does not say:
 {"people":["Riya"],"places":["goa"],"time":{"label":"around Diwali 2025","windows":[["2025-10-13","2025-10-27"]]},"details":[{"thing":"hoodie","colour":"yellow"}],"text":["indigo"]}

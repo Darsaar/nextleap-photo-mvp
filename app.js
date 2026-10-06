@@ -3,7 +3,16 @@ import { ruleParse, tagsFromAI, parseTime, search, scorePhoto, followUp, oneWord
 const $ = id => document.getElementById(id);
 const h = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
+// What people in our survey said they were looking for (de-identified, lightly shortened).
+// The sample library rarely has that exact photo, so these show how close matches help.
+const SURVEY = [
+  "medicine strip from when I had fever last year", "birthday party, I was blowing the candles", "a photo of me in Coorg",
+  "Aadhar card", "identity card", "my childhood photos", "screenshot of backup codes", "bike traffic in bengaluru",
+  "birthday beta", "photo in orange saree", "screenshot of a dress I wanted to buy", "doctor's prescription",
+  "anniversary pic", "group photo where my face is clear",
+];
 const EXAMPLES = [
+  "kid with blue t shirt",
   "me and Riya in Goa around Diwali",
   "man with a mole and freckles",
   "that AC bill from last summer",
@@ -631,10 +640,15 @@ function showTasks() {
     <table class="mtable"><tr><th>Task</th><th>Memory Match</th><th>One word (best to worst)</th><th>Tags</th><th>Time</th></tr>
     ${ids.map(id => { const m = measures[id]; return `<tr><td>${id.slice(1)}</td><td>#${m.mmRank}</td><td>${m.todayBest ? `#${m.todayBest} to #${m.todayWorst}` : "not found"}</td><td>${m.tags}</td><td>${m.secs}s</td></tr>`; }).join("")}</table>
     <p class="sec small">Measured on a sample library of fictional photos. This shows how the idea works, not results from real users.</p>
-    <button class="textbtn" id="copyCsv">Copy as CSV</button>` : ""}`);
+    <button class="textbtn" id="copyCsv">Copy as CSV</button>` : ""}
+    <h2>Searches from our survey</h2>
+    <p class="sec">What people told us they were trying to find. This library may not have that exact photo, so you'll see the closest ones, marked ~.</p>
+    <div class="chips">${SURVEY.map(q => `<button class="chip" data-survey="${h(q)}">${h(q)}</button>`).join("")}</div>`);
   $("dBody").onclick = e => {
     const li = e.target.closest("[data-task]");
     if (li) { closeDialog(); startTask(li.dataset.task); }
+    const sv = e.target.closest("[data-survey]");
+    if (sv) { closeDialog(); activeTask = null; scope = null; setPlaceholder(); run(sv.dataset.survey); }
     if (e.target.closest("#copyCsv")) copyCsv(e.target.closest("#copyCsv"));
   };
 }
