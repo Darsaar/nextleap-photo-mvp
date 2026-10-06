@@ -226,7 +226,7 @@ function lev(a, b) {
 export function fuzzyFind(word, p) {
   const w = word.toLowerCase();
   if (w.length < 3) return null;
-  const fields = [...p.people, p.place, p.city, ...p.objects, p.source, p.text || ""].filter(Boolean);
+  const fields = [...p.people, p.place, p.city, ...p.objects, p.source, p.text || "", ...(p.learned || [])].filter(Boolean);
   for (const f of fields) {
     for (const tok of f.toLowerCase().split(/[^a-z0-9']+/).filter(Boolean)) {
       const ok = tok === w || tok.startsWith(w)

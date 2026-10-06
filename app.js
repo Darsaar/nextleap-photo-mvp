@@ -29,6 +29,9 @@ let viewing = null;
 let readBy = "";
 let scope = null; // an open collection: { name, tags }
 let measures = {};
+let learned = {}; // photo id -> words the user searched before finding it, checked against the photo
+let searchLog = []; // recent searches: { tags, full (ids that matched everything), at, done }
+try { learned = JSON.parse(localStorage.getItem("mm-learned") || "{}"); } catch (e) {}
 try { measures = JSON.parse(localStorage.getItem("mm-measures") || "{}"); } catch (e) {}
 
 const ICON = { person: "person", place: "location_on", time: "calendar_today", detail: "sell", text: "match_case", kind: "photo_library", daypart: "schedule" };
@@ -42,6 +45,7 @@ const img = p => `photos/${p.id}.jpg`;
 async function boot() {
   const j = await (await fetch("data/library.json")).json();
   LIB = j.photos;
+  LIB.forEach(p => { if (learned[p.id]) p.learned = learned[p.id]; });
   $("libcount").textContent = `${LIB.length} photos of Aarav, a made-up user. “Today” is ${fmtDate(TODAY)}.`;
   $("form").onsubmit = e => {
     e.preventDefault(); hideSuggest();
@@ -333,6 +337,7 @@ async function run(sentence) {
   readBy = r.by;
   todayWord = null;
   refresh();
+  if (tags.length) { searchLog.push({ tags, full: result.scored.filter(x => x.full).map(x => x.photo.id), at: Date.now(), done: new Set() }); searchLog = searchLog.slice(-10); }
 }
 
 function makeTag(type, val) {
@@ -537,10 +542,17 @@ function openPhoto(id) {
   const p = LIB.find(x => x.id === id);
   viewing = p;
   const s = tags.length ? result.scored.find(x => x.photo.id === id) : null;
-  const c = p.credit;
   $("vImg").src = img(p);
   $("foundBtn").classList.toggle("hidden", !activeTask);
   $("foundNote").classList.add("hidden");
+  renderPanel(p, s);
+  $("vPanel").classList.toggle("hidden", window.innerWidth < 800 && !s);
+  $("viewer").classList.remove("hidden");
+  $("learnNote").classList.add("hidden");
+  maybeLearn(p);
+}
+function renderPanel(p, s) {
+  const c = p.credit;
   $("vPanel").innerHTML = `
     <h3>Info</h3>
     ${s ? `<p class="ov">WHY IT CAME UP</p><div class="why">${whyLine(s.checks)}</div>` : ""}
@@ -552,12 +564,42 @@ function openPhoto(id) {
     <p class="ov">THINGS IN THIS PHOTO</p>
     <div class="chips" style="margin-top:0">${p.objects.map(o => `<span class="chip plain">${h(o)}</span>`).join("")}</div>
     ${p.text ? `<p class="ov">WORDS IN THE PHOTO</p><p class="small">${h(p.text)}</p>` : ""}
+    ${p.learned?.length ? `<p class="ov">YOU'VE SEARCHED FOR IT AS</p><div class="chips" style="margin-top:0">${p.learned.map(w => `<span class="chip plain">${h(w)}<button class="x" data-unlearn="${h(w)}" aria-label="Forget ${h(w)}"><span class="ms">close</span></button></span>`).join("")}</div>` : ""}
     <p class="ov">CREDIT</p>
     <p class="sec small">${c.url ? `<a href="${h(c.url)}" target="_blank" rel="noopener">${h(c.title)}</a> by ${h(c.creator || "unknown")} · ${h(c.license)}${c.modified ? ` · ${h(c.modified)}` : ""}` : h(c.title)}. The people, place and date above are made up for the demo.</p>`;
-  $("vPanel").classList.toggle("hidden", window.innerWidth < 800 && !s);
-  $("viewer").classList.remove("hidden");
+  $("vPanel").onclick = e => { const b = e.target.closest("[data-unlearn]"); if (b) { forget(p, [b.dataset.unlearn]); renderPanel(p, s); } };
 }
 function closeViewer() { $("viewer").classList.add("hidden"); viewing = null; }
+
+// ---------- learning from searches that missed ----------
+// If you searched, didn't find this photo, and then reached it another way, the words it was missing
+// are checked against the photo itself (Gemini looks at the image). Only words it can see are saved.
+const phrase = t => t.type === "detail" ? `${t.color ? t.color + " " : ""}${t.value}` : String(t.value);
+async function maybeLearn(p) {
+  const miss = [...searchLog].reverse().find(e => Date.now() - e.at < 15 * 60e3 && !e.full.includes(p.id) && !e.done.has(p.id));
+  if (!miss) return;
+  miss.done.add(p.id);
+  const words = [...new Set(scorePhoto(miss.tags, p).checks
+    .filter(c => c.r !== "yes" && ["detail", "any", "text"].includes(c.tag.type)).map(c => phrase(c.tag)))]
+    .filter(w => !(p.learned || []).includes(w));
+  if (!words.length) return;
+  let seen = null;
+  try {
+    const r = await fetch("api/verify", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: p.id, words }) });
+    if (r.ok) seen = (await r.json()).seen;
+  } catch (e) {}
+  if (!Array.isArray(seen) || !seen.length || viewing !== p) return;
+  learn(p, seen);
+  const note = $("learnNote");
+  note.innerHTML = `<span class="ms">auto_awesome</span><span>Next time, ${seen.map(w => `“${h(w)}”`).join(" and ")} will find this photo</span><button id="undoLearn">Undo</button>`;
+  note.classList.remove("hidden");
+  const s = tags.length ? result.scored.find(x => x.photo.id === p.id) : null;
+  $("undoLearn").onclick = () => { forget(p, seen); note.classList.add("hidden"); renderPanel(p, s); };
+  renderPanel(p, s);
+}
+function saveLearned() { try { localStorage.setItem("mm-learned", JSON.stringify(learned)); } catch (e) {} }
+function learn(p, words) { p.learned = [...new Set([...(p.learned || []), ...words])]; learned[p.id] = p.learned; saveLearned(); }
+function forget(p, words) { p.learned = (p.learned || []).filter(w => !words.includes(w)); if (p.learned.length) learned[p.id] = p.learned; else delete learned[p.id]; saveLearned(); }
 
 function markFound() {
   const t = targetPhoto(), p = viewing, note = $("foundNote");
