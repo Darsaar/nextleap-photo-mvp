@@ -1,5 +1,5 @@
 # Memory Match
-
+###############################
 A concept demo for a NextLeap PM case on finding half-remembered photos in Google Photos. It is not a Google product.
 
 You describe a photo in your own words. The app turns the sentence into tags you can see and edit (who, where, when, details, words in the photo), searches with all of them together, and shows the six best photos with a line saying what matched (✓), what was close (~) and what was missing (✗). Look-alike photos from the same moment are stacked into one tile. When nothing matches everything, it shows the closest photos and asks one follow-up question.
